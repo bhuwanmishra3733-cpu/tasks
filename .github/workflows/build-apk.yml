@@ -17,7 +17,7 @@ jobs:
 
       - name: Create all project files
         run: |
-          mkdir -p app/src/main/java/com/example/mytaskmanager
+          mkdir -p app/src/main/java/com/example/mytaskmanager app/src/main/res/drawable app/src/main/res/mipmap-anydpi app/src/main/res/mipmap-anydpi-v26
           cat > gradle.properties <<'EOF_FILE'
           org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8
           org.gradle.parallel=true
@@ -102,11 +102,46 @@ jobs:
               implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
           }
           EOF_FILE
+          cat > app/src/main/res/drawable/ic_launcher_background.xml <<'EOF_FILE'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#5B4BDB" android:pathData="M0,0h108v108h-108z"/>
+          </vector>
+          EOF_FILE
+          cat > app/src/main/res/drawable/ic_launcher_foreground.xml <<'EOF_FILE'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:strokeColor="#FFFFFF" android:strokeWidth="9"
+                  android:strokeLineCap="round" android:strokeLineJoin="round"
+                  android:pathData="M36,56 L48,68 L74,40"/>
+          </vector>
+          EOF_FILE
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF_FILE'
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background"/>
+              <foreground android:drawable="@drawable/ic_launcher_foreground"/>
+          </adaptive-icon>
+          EOF_FILE
+          cat > app/src/main/res/mipmap-anydpi/ic_launcher.xml <<'EOF_FILE'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#5B4BDB"
+                  android:pathData="M30,6 H78 A24,24 0 0 1 102,30 V78 A24,24 0 0 1 78,102 H30 A24,24 0 0 1 6,78 V30 A24,24 0 0 1 30,6 Z"/>
+              <path android:strokeColor="#FFFFFF" android:strokeWidth="9"
+                  android:strokeLineCap="round" android:strokeLineJoin="round"
+                  android:pathData="M36,56 L48,68 L74,40"/>
+          </vector>
+          EOF_FILE
           cat > app/src/main/AndroidManifest.xml <<'EOF_FILE'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <application
                   android:allowBackup="true"
-                  android:label="My Task Manager"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher"
+                  android:label="Task Manager by Bhuvan"
                   android:supportsRtl="true"
                   android:theme="@android:style/Theme.Material.Light.NoActionBar">
                   <activity
@@ -890,4 +925,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest -y --cleanup-tag || true
-          gh release create latest out/MyTaskManager.apk --title "My Task Manager APK" --notes "Download MyTaskManager.apk and install it on your phone."
+          gh release create latest out/MyTaskManager.apk --title "Task Manager by Bhuvan" --notes "Download MyTaskManager.apk and install it on your phone."
