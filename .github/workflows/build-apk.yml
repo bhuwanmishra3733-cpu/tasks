@@ -1,0 +1,469 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Create all project files
+        run: |
+          mkdir -p app/src/main/java/com/example/mytaskmanager
+          cat > gradle.properties <<'EOF_FILE'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          EOF_FILE
+          cat > settings.gradle.kts <<'EOF_FILE'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "MyTaskManager"
+          include(":app")
+          EOF_FILE
+          cat > build.gradle.kts <<'EOF_FILE'
+          plugins {
+              id("com.android.application") version "8.7.3" apply false
+              id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+              id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+          }
+          EOF_FILE
+          cat > app/build.gradle.kts <<'EOF_FILE'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+              id("org.jetbrains.kotlin.plugin.compose")
+          }
+
+          android {
+              namespace = "com.example.mytaskmanager"
+              compileSdk = 35
+
+              defaultConfig {
+                  applicationId = "com.example.mytaskmanager"
+                  minSdk = 23
+                  targetSdk = 35
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              buildFeatures {
+                  compose = true
+              }
+          }
+
+          dependencies {
+              implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+              implementation("androidx.activity:activity-compose:1.10.0")
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.ui:ui-tooling-preview")
+              implementation("androidx.compose.material3:material3")
+              implementation("androidx.compose.material:material-icons-extended")
+              implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+              debugImplementation("androidx.compose.ui:ui-tooling")
+          }
+          EOF_FILE
+          cat > app/src/main/AndroidManifest.xml <<'EOF_FILE'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:allowBackup="true"
+                  android:label="My Task Manager"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF_FILE
+          cat > app/src/main/java/com/example/mytaskmanager/MainActivity.kt <<'EOF_FILE'
+          package com.example.mytaskmanager
+
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.compose.foundation.clickable
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.foundation.text.KeyboardActions
+          import androidx.compose.foundation.text.KeyboardOptions
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.Add
+          import androidx.compose.material.icons.filled.DarkMode
+          import androidx.compose.material.icons.filled.Delete
+          import androidx.compose.material.icons.filled.LightMode
+          import androidx.compose.material.icons.filled.PushPin
+          import androidx.compose.material.icons.filled.Search
+          import androidx.compose.material.icons.filled.TaskAlt
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.input.ImeAction
+          import androidx.compose.ui.unit.dp
+          import org.json.JSONArray
+          import org.json.JSONObject
+
+          private data class TaskItem(
+              val id: Long,
+              val title: String,
+              val page: String,
+              val done: Boolean = false,
+              val pinned: Boolean = false
+          )
+
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContent { TaskManagerApp() }
+              }
+          }
+
+          @OptIn(ExperimentalMaterial3Api::class)
+          @Composable
+          private fun TaskManagerApp() {
+              val context = LocalContext.current
+              val prefs = remember { context.getSharedPreferences("task_manager", 0) }
+              var tasks by remember { mutableStateOf(loadTasks(prefs.getString("tasks", "[]") ?: "[]")) }
+              var pages by remember { mutableStateOf(loadPages(prefs.getString("pages", "[\"My Tasks\"]") ?: "[\"My Tasks\"]")) }
+              var selectedPage by remember { mutableStateOf("My Tasks") }
+              var showPending by remember { mutableStateOf(false) }
+              var darkMode by remember { mutableStateOf(prefs.getBoolean("dark", false)) }
+              var searchText by remember { mutableStateOf("") }
+              var newTaskText by remember { mutableStateOf("") }
+              var newPageText by remember { mutableStateOf("") }
+              var showAddPage by remember { mutableStateOf(false) }
+
+              fun save() {
+                  prefs.edit()
+                      .putString("tasks", tasksToJson(tasks))
+                      .putString("pages", pagesToJson(pages))
+                      .putBoolean("dark", darkMode)
+                      .apply()
+              }
+
+              val colorScheme = if (darkMode) darkColorScheme() else lightColorScheme()
+              MaterialTheme(colorScheme = colorScheme) {
+                  Scaffold(
+                      topBar = {
+                          TopAppBar(
+                              title = {
+                                  Column {
+                                      Text("My Task Manager", fontWeight = FontWeight.Bold)
+                                      Text(
+                                          if (showPending) "All pending tasks" else selectedPage,
+                                          style = MaterialTheme.typography.labelMedium
+                                      )
+                                  }
+                              },
+                              actions = {
+                                  IconButton(onClick = {
+                                      darkMode = !darkMode
+                                      save()
+                                  }) {
+                                      Icon(
+                                          if (darkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                          contentDescription = "Switch theme"
+                                      )
+                                  }
+                              }
+                          )
+                      },
+                      floatingActionButton = {
+                          FloatingActionButton(onClick = {
+                              if (newTaskText.isNotBlank()) {
+                                  tasks = tasks + TaskItem(
+                                      id = System.currentTimeMillis(),
+                                      title = newTaskText.trim(),
+                                      page = if (showPending) selectedPage else selectedPage
+                                  )
+                                  newTaskText = ""
+                                  save()
+                              }
+                          }) {
+                              Icon(Icons.Default.Add, contentDescription = "Add task")
+                          }
+                      }
+                  ) { padding ->
+                      Column(
+                          modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)
+                      ) {
+                          Row(
+                              modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                              horizontalArrangement = Arrangement.spacedBy(8.dp)
+                          ) {
+                              FilterChip(
+                                  selected = !showPending,
+                                  onClick = { showPending = false },
+                                  label = { Text("Current page") },
+                                  leadingIcon = { Icon(Icons.Default.TaskAlt, null) }
+                              )
+                              FilterChip(
+                                  selected = showPending,
+                                  onClick = { showPending = true },
+                                  label = { Text("Pending") }
+                              )
+                              Spacer(Modifier.weight(1f))
+                              IconButton(onClick = { showAddPage = true }) {
+                                  Icon(Icons.Default.Add, contentDescription = "New page")
+                              }
+                          }
+
+                          OutlinedTextField(
+                              value = searchText,
+                              onValueChange = { searchText = it },
+                              modifier = Modifier.fillMaxWidth(),
+                              placeholder = { Text("Search tasks…") },
+                              leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                              singleLine = true
+                          )
+                          Spacer(Modifier.height(8.dp))
+
+                          OutlinedTextField(
+                              value = newTaskText,
+                              onValueChange = { newTaskText = it },
+                              modifier = Modifier.fillMaxWidth(),
+                              placeholder = { Text("Write a new task…") },
+                              singleLine = true,
+                              keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                              keyboardActions = KeyboardActions(onDone = {
+                                  if (newTaskText.isNotBlank()) {
+                                      tasks = tasks + TaskItem(System.currentTimeMillis(), newTaskText.trim(), selectedPage)
+                                      newTaskText = ""
+                                      save()
+                                  }
+                              })
+                          )
+                          Spacer(Modifier.height(8.dp))
+
+                          if (!showPending) {
+                              Text("Pages", style = MaterialTheme.typography.labelLarge)
+                              Row(
+                                  modifier = Modifier.fillMaxWidth(),
+                                  horizontalArrangement = Arrangement.spacedBy(6.dp)
+                              ) {
+                                  pages.forEach { page ->
+                                      FilterChip(
+                                          selected = selectedPage == page,
+                                          onClick = { selectedPage = page },
+                                          label = { Text(page, maxLines = 1) }
+                                      )
+                                  }
+                              }
+                          }
+
+                          val visibleTasks = tasks
+                              .filter { if (showPending) !it.done else it.page == selectedPage }
+                              .filter { it.title.contains(searchText, ignoreCase = true) }
+                              .sortedWith(compareByDescending<TaskItem> { it.pinned }.thenBy { it.done }.thenByDescending { it.id })
+
+                          Text(
+                              "${visibleTasks.count { !it.done }} pending · ${visibleTasks.count { it.done }} completed",
+                              modifier = Modifier.padding(vertical = 8.dp),
+                              style = MaterialTheme.typography.labelMedium
+                          )
+
+                          if (visibleTasks.isEmpty()) {
+                              Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                  Text(if (searchText.isNotBlank()) "No matching tasks" else "Nothing here yet. Add your first task!")
+                              }
+                          } else {
+                              LazyColumn(
+                                  modifier = Modifier.weight(1f, fill = true),
+                                  verticalArrangement = Arrangement.spacedBy(8.dp),
+                                  contentPadding = PaddingValues(bottom = 88.dp)
+                              ) {
+                                  items(visibleTasks, key = { it.id }) { task ->
+                                      Card(
+                                          shape = RoundedCornerShape(16.dp),
+                                          modifier = Modifier.fillMaxWidth()
+                                      ) {
+                                          Row(
+                                              modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                              verticalAlignment = Alignment.CenterVertically
+                                          ) {
+                                              Checkbox(
+                                                  checked = task.done,
+                                                  onCheckedChange = { checked ->
+                                                      tasks = tasks.map { if (it.id == task.id) it.copy(done = checked) else it }
+                                                      save()
+                                                  }
+                                              )
+                                              Column(
+                                                  modifier = Modifier.weight(1f).clickable {
+                                                      tasks = tasks.map { if (it.id == task.id) it.copy(done = !it.done) else it }
+                                                      save()
+                                                  }.padding(horizontal = 8.dp)
+                                              ) {
+                                                  Text(
+                                                      task.title,
+                                                      style = MaterialTheme.typography.bodyLarge,
+                                                      fontWeight = if (task.pinned) FontWeight.Bold else FontWeight.Normal,
+                                                      color = if (task.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+                                                  )
+                                                  if (showPending) {
+                                                      Text(task.page, style = MaterialTheme.typography.labelSmall)
+                                                  }
+                                              }
+                                              IconButton(onClick = {
+                                                  tasks = tasks.map { if (it.id == task.id) it.copy(pinned = !it.pinned) else it }
+                                                  save()
+                                              }) {
+                                                  Icon(
+                                                      Icons.Default.PushPin,
+                                                      contentDescription = "Pin task",
+                                                      tint = if (task.pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                  )
+                                              }
+                                              IconButton(onClick = {
+                                                  tasks = tasks.filterNot { it.id == task.id }
+                                                  save()
+                                              }) {
+                                                  Icon(Icons.Default.Delete, contentDescription = "Delete task")
+                                              }
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+
+                  if (showAddPage) {
+                      AlertDialog(
+                          onDismissRequest = { showAddPage = false },
+                          title = { Text("Create a new page") },
+                          text = {
+                              OutlinedTextField(
+                                  value = newPageText,
+                                  onValueChange = { newPageText = it },
+                                  label = { Text("Page name") },
+                                  singleLine = true
+                              )
+                          },
+                          confirmButton = {
+                              TextButton(onClick = {
+                                  val page = newPageText.trim()
+                                  if (page.isNotEmpty() && !pages.contains(page)) {
+                                      pages = pages + page
+                                      selectedPage = page
+                                      showPending = false
+                                      save()
+                                  }
+                                  newPageText = ""
+                                  showAddPage = false
+                              }) { Text("Create") }
+                          },
+                          dismissButton = {
+                              TextButton(onClick = { showAddPage = false }) { Text("Cancel") }
+                          }
+                      )
+                  }
+              }
+          }
+
+          private fun loadTasks(raw: String): List<TaskItem> = try {
+              val array = JSONArray(raw)
+              (0 until array.length()).map { i ->
+                  val o = array.getJSONObject(i)
+                  TaskItem(
+                      id = o.optLong("id", i.toLong()),
+                      title = o.optString("title"),
+                      page = o.optString("page", "My Tasks"),
+                      done = o.optBoolean("done"),
+                      pinned = o.optBoolean("pinned")
+                  )
+              }
+          } catch (_: Exception) { emptyList() }
+
+          private fun tasksToJson(tasks: List<TaskItem>): String {
+              val array = JSONArray()
+              tasks.forEach { task ->
+                  array.put(JSONObject().apply {
+                      put("id", task.id)
+                      put("title", task.title)
+                      put("page", task.page)
+                      put("done", task.done)
+                      put("pinned", task.pinned)
+                  })
+              }
+              return array.toString()
+          }
+
+          private fun loadPages(raw: String): List<String> = try {
+              val array = JSONArray(raw)
+              (0 until array.length()).map { array.getString(it) }.ifEmpty { listOf("My Tasks") }
+          } catch (_: Exception) { listOf("My Tasks") }
+
+          private fun pagesToJson(pages: List<String>): String {
+              val array = JSONArray()
+              pages.forEach { array.put(it) }
+              return array.toString()
+          }
+          EOF_FILE
+          echo Project files created
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Install Android SDK packages
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-35" "build-tools;35.0.0" || true
+
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MyTaskManager-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Publish APK to Releases
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk MyTaskManager.apk
+          gh release delete latest -y --cleanup-tag || true
+          gh release create latest MyTaskManager.apk --title "My Task Manager APK" --notes "Download MyTaskManager.apk and install it on your phone."
